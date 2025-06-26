@@ -80,23 +80,27 @@ public:
     active_index = TypeIndex<T, Types...>::value;
   }
 
-  template <typename Visitor> void visit(Visitor &&visitor) const {
-    static constexpr auto dispatch_table = make_dispatch_table<Visitor>();
-    dispatch_table[active_index](&data, visitor);
+    using FirstTypeT = typename TypeAt<0, Types...>::type;
+    using FirstType = const FirstTypeT;
+
+  template <typename Visitor> auto visit(Visitor &&visitor) const {
+    using RetT = decltype(std::declval<Visitor>()(std::declval<FirstType &>()));
+    static constexpr auto dispatch_table = make_dispatch_table<Visitor, RetT>();
+    return dispatch_table[active_index](&data, visitor);
   }
 
 private:
-  template <typename Visitor, size_t... Indices>
+  template <typename Visitor, typename RetT, size_t... Indices>
   static constexpr auto make_dispatch_table_impl(index_sequence<Indices...>) {
-    return std::array<void (*)(const void *, Visitor &), sizeof...(Types)>{
+    return std::array<RetT (*)(const void *, Visitor &), sizeof...(Types)>{
         [](const void *data_ptr, Visitor &visitor) {
           using CurrentType = typename TypeAt<Indices, Types...>::type;
-          visitor(*reinterpret_cast<const CurrentType *>(data_ptr));
+          return visitor(*reinterpret_cast<const CurrentType *>(data_ptr));
         }...};
   }
 
-  template <typename Visitor> static constexpr auto make_dispatch_table() {
-    return make_dispatch_table_impl<Visitor>(
+  template <typename Visitor, typename RetT> static constexpr auto make_dispatch_table() {
+    return make_dispatch_table_impl<Visitor, RetT>(
         make_index_sequence<sizeof...(Types)>());
   }
 };
@@ -141,16 +145,19 @@ int main(int argc, char *argv[]) {
   var.set(std::move(k));
 
   auto overloads = make_overload(
-      [](const std::vector<int> &v) {
+      [](const std::vector<int> &v) -> int {
         std::cout << "Outputting a list \n";
         for (auto &s : v) {
           std::cout << s << "\n";
         }
+            return 1;
       },
-      [](int k) { std::cout << "int " << k << "\n"; },
-      [](const std::string &v) { std::cout << "string " << v << "\n"; });
+      [](int k) -> int { std::cout << "int " << k << "\n"; return 2;},
+      [](const std::string &v) -> int { std::cout << "string " << v << "\n"; return 3; });
 
-  var.visit(overloads);
+  auto x = var.visit(overloads);
+
+    std::cout << x << "\n";
 
   std::cout << "Hello world\n";
 
