@@ -51,6 +51,20 @@ struct TypeAt<Index, First, Rest...> {
   using type = typename TypeAt<Index - 1, Rest...>::type;
 };
 
+
+template <class First, class... Others>
+struct all_equal;
+
+template <class First>
+struct all_equal<First> {
+    static constexpr bool value = true;
+};
+
+template <class First, class Second, class... Others>
+struct all_equal<First, Second, Others...> {
+    static constexpr bool value = std::is_same_v<First, Second> && all_equal<First, Others...>::value;
+};
+
 template <typename... Types> class Variant {
   static constexpr std::size_t MaxSize = std::max({sizeof(Types)...});
   static constexpr std::size_t MaxAlign = std::max({alignof(Types)...});
@@ -83,7 +97,25 @@ public:
     using FirstTypeT = typename TypeAt<0, Types...>::type;
     using FirstType = const FirstTypeT;
 
+    template <class Visitor, class Desired, class Actual>
+    static constexpr void validate_one() {
+        using T = decltype(std::declval<Visitor>()(std::declval<Actual &>()));
+        static_assert(std::is_same_v<Desired, T>);
+    }
+
+
+    template <class Visitor>
+    static constexpr void validate_return_types() {
+        using FirstReturn = decltype(std::declval<Visitor>()(std::declval<FirstType &>()));
+        constexpr bool all_eq = all_equal<FirstReturn, decltype(std::declval<Visitor>()(std::declval<Types &>()))...>::value;
+        static_assert(all_eq, "Your overload set must have consistent return types!");
+    }
+
   template <typename Visitor> auto visit(Visitor &&visitor) const {
+
+    // Provide a helpful message for why this instantiation is going to fail
+    (void)validate_return_types<Visitor>;
+
     using RetT = decltype(std::declval<Visitor>()(std::declval<FirstType &>()));
     static constexpr auto dispatch_table = make_dispatch_table<Visitor, RetT>();
     return dispatch_table[active_index](&data, visitor);
