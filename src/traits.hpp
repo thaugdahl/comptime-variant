@@ -68,6 +68,12 @@ struct all_equal<First, Second, Others...> {
     static constexpr bool value = std::is_same_v<First, Second> && all_equal<First, Others...>::value;
 };
 
+
+template <class Fn, class Arg>
+struct SingleArgReturnType {
+    using type = decltype(std::declval<Fn>()(std::declval<Arg>()));
+};
+
 #endif
 
 // vim: set ft=cpp

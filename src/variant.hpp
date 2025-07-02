@@ -4,10 +4,59 @@
 #include <algorithm>
 #include <cstddef>
 #include "traits.hpp"
+#include <array>
 
 //===------------------------------------------------------------====//
 //=== Variant Implementation
 //===------------------------------------------------------------====//
+
+
+template <class... Types> class Variant;
+
+struct VariantDispatchTable {
+
+private:
+    template <class Visitor, class RetT, class... Types, std::size_t... Indices>
+    static constexpr auto get_impl(index_sequence<Indices...>) {
+        return std::array<RetT (*)(const void *, Visitor &), sizeof...(Types)>{
+            [](void *data_ptr, Visitor &visitor) {
+                using CurrentType = typename TypeAt<Indices, Types...>::type;
+                return visitor(*reinterpret_cast<const CurrentType *>(data_ptr));
+            }...};
+    }
+
+    template <class Visitor, class Ret, class... Types>
+    static constexpr auto get() {
+        return get_impl<Visitor, Ret, Types...>(make_index_sequence<sizeof...(Types)>());
+    };
+
+    template <class... Types>
+    friend class Variant;
+
+};
+
+
+struct VariantDispatchTableMut {
+private:
+    template <class Visitor, class RetT, class... Types, std::size_t... Indices>
+    static constexpr auto get_impl(index_sequence<Indices...>) {
+        return std::array<RetT (*)(void *, Visitor &), sizeof...(Types)>{
+            [](void *data_ptr, Visitor &visitor) {
+                using CurrentType = typename TypeAt<Indices, Types...>::type;
+                return visitor(*reinterpret_cast<CurrentType *>(data_ptr));
+            }...};
+    }
+
+    template <class Visitor, class Ret, class... Types>
+    static constexpr auto get() {
+        return get_impl<Visitor, Ret, Types...>(make_index_sequence<sizeof...(Types)>());
+    }
+
+    template <class... Types>
+    friend class Variant;
+};
+
+
 
 template <typename... Types> class Variant {
     static constexpr std::size_t MaxSize = std::max({sizeof(Types)...});
@@ -39,15 +88,6 @@ public:
     }
 
     using FirstTypeT = typename TypeAt<0, Types...>::type;
-    using FirstType =  FirstTypeT;
-    using FirstTypeMut = FirstTypeT;
-
-    template <class Visitor, class Desired, class Actual>
-    static constexpr void validate_one() {
-        using T = decltype(std::declval<Visitor>()(std::declval<Actual &>()));
-        static_assert(std::is_same_v<Desired, T>);
-    }
-
 
     template <class Visitor, class Type>
     static constexpr void validate_return_types() {
@@ -59,55 +99,22 @@ public:
     // ======================================
     // MUTATING VISITOR
     // ======================================
-
     template <typename Visitor> decltype(auto) visit(Visitor &&visitor) {
-        (void) validate_return_types<Visitor, FirstTypeMut>();
-        using RetT = decltype(std::declval<Visitor>()(std::declval<FirstTypeMut &>()));
-        static constexpr auto dispatch_table = make_dispatch_table_mut<Visitor, RetT>();
+        (void) validate_return_types<Visitor, FirstTypeT>();
+        using RetT = typename SingleArgReturnType<Visitor, FirstTypeT &>::type;
+        static constexpr auto dispatch_table = VariantDispatchTableMut::get<Visitor, RetT, Types...>();
         return dispatch_table[active_index](&data, visitor);
     }
-
-private:
-    template <typename Visitor, typename RetT, size_t... Indices>
-    static constexpr auto make_dispatch_table_mut_impl(index_sequence<Indices...>) {
-        return std::array<RetT (*)(void *, Visitor &), sizeof...(Types)>{
-            [](void *data_ptr, Visitor &visitor) {
-                using CurrentType = typename TypeAt<Indices, Types...>::type;
-                return visitor(*reinterpret_cast<CurrentType *>(data_ptr));
-            }...};
-    }
-
-    template <typename Visitor, typename RetT> static constexpr auto make_dispatch_table_mut() {
-        return make_dispatch_table_mut_impl<Visitor, RetT>(
-            make_index_sequence<sizeof...(Types)>());
-    }
-
 
     // ======================================
     // PURE VISITOR
     // ======================================
-public:
     template <typename Visitor> decltype(auto) visit(Visitor &&visitor) const {
-        (void)validate_return_types<Visitor, FirstType>();
+        (void)validate_return_types<Visitor, const FirstTypeT>();
 
-        using RetT = decltype(std::declval<Visitor>()(std::declval<FirstType &>()));
-        static constexpr auto dispatch_table = make_dispatch_table<Visitor, RetT>();
+        using RetT = typename SingleArgReturnType<Visitor, FirstTypeT &>::type;
+        static constexpr auto dispatch_table = VariantDispatchTable::get<Visitor, RetT, Types...>();
         return dispatch_table[active_index](&data, visitor);
-    }
-
-private:
-    template <typename Visitor, typename RetT, size_t... Indices>
-    static constexpr auto make_dispatch_table_impl(index_sequence<Indices...>) {
-        return std::array<RetT (*)(const void *, Visitor &), sizeof...(Types)>{
-            [](const void *data_ptr, Visitor &visitor) {
-                using CurrentType = typename TypeAt<Indices, Types...>::type;
-                return visitor(*reinterpret_cast<const CurrentType *>(data_ptr));
-            }...};
-    }
-
-    template <typename Visitor, typename RetT> static constexpr auto make_dispatch_table() {
-        return make_dispatch_table_impl<Visitor, RetT>(
-            make_index_sequence<sizeof...(Types)>());
     }
 
 };
